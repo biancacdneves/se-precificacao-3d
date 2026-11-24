@@ -322,4 +322,154 @@ def montar_fatos(material: str, peso_g: float, tempo_h: float, finalidade: str,
         raise ValueError("Temperatura do bico deve ser positiva e da mesa não pode ser negativa.")
     return {
         "material": material, "peso_g": float(peso_g), "tempo_h": float(tempo_h),
-        "finalidade": finalidade, "quantidade
+        "finalidade": finalidade, "quantidade": int(quantidade), "urgente": bool(urgente),
+        "temp_bico": bico, "temp_mesa": mesa,
+        **({"orcamento_cliente": float(orcamento_cliente)}
+           if orcamento_cliente is not None else {}),
+    }
+
+
+def consultar(**entradas) -> tuple[dict, list[str]]:
+    """Recebe as entradas do pedido, roda o motor e devolve (resultado, explicação)."""
+    fatos = montar_fatos(**entradas)
+    motor = MotorInferencia(regras=REGRAS)
+    resultado = motor.inferir(fatos)
+    return resultado, motor.explicacao
+
+
+# ---------------------------------------------------------------------------
+# 5. CASOS DE DEMONSTRAÇÃO (Tabelas 4 e 5 do artigo)
+# ---------------------------------------------------------------------------
+
+CASOS_DEMO: dict[str, dict] = {
+    "C1 — Vaso decorativo": dict(
+        material="PLA", peso_g=120, tempo_h=6, finalidade="decorativa",
+        quantidade=1, temp_mesa=60),
+    "C2 — Suporte mecânico urgente": dict(
+        material="ABS", peso_g=250, tempo_h=14, finalidade="funcional",
+        quantidade=1, temp_mesa=100, urgente=True),
+    "C3 — Lote de chaveiros": dict(
+        material="PETG", peso_g=15, tempo_h=1, finalidade="decorativa",
+        quantidade=20, temp_mesa=80, orcamento_cliente=100.0),
+    "C4 — Junta flexível": dict(
+        material="TPU", peso_g=80, tempo_h=8, finalidade="funcional",
+        quantidade=1, temp_mesa=50, orcamento_cliente=40.0),
+}
+
+
+# ---------------------------------------------------------------------------
+# 6. INTERFACE (TERMINAL)
+# ---------------------------------------------------------------------------
+
+def imprimir_resultado(r: dict, explicacao: list[str]) -> None:
+    """Mostra o resultado do orçamento e a explicação do raciocínio."""
+    print()
+    print(f"Taxa de falha: {r['taxa_falha']:.0%} (risco {r['nivel_risco']})")
+    print(f"Material (com perdas): R$ {r['custo_material_ajustado']:.2f}")
+    print(f"Energia: R$ {r['custo_energia']:.2f}  ({r['consumo_kwh']:.2f} kWh, "
+          f"{r['potencia_w']:.1f} W, classe {r['classe_energia']})")
+    print(f"Máquina (depreciação): R$ {r['custo_maquina']:.2f}")
+    print(f"Custo total: R$ {r['custo_total']:.2f}")
+    print(f"Margem aplicada: {r['margem_aplicada']:.0%}")
+    print(f"Preço sugerido: R$ {r['preco_sugerido']:.2f} "
+          f"(R$ {r['preco_unitario']:.2f} por peça)")
+    print(f"DECISÃO: {r['decisao']}  |  preço final R$ {r['preco_final']:.2f} "
+          f"(margem efetiva {r['margem_efetiva']:.0%})")
+    print()
+    print("Por quê? (regras disparadas: " + ", ".join(r["regras_disparadas"]) + ")")
+    for linha in explicacao:
+        print(linha)
+    print()
+
+
+def executar_demo() -> None:
+    """Roda os quatro casos do artigo."""
+    for titulo, entradas in CASOS_DEMO.items():
+        print("=" * 70)
+        print(titulo)
+        print("=" * 70)
+        resultado, explicacao = consultar(**entradas)
+        imprimir_resultado(resultado, explicacao)
+
+
+def listar_regras() -> None:
+    """Mostra as regras da base de conhecimento na forma SE–ENTÃO."""
+    for regra in REGRAS:
+        print(f"\n{regra.codigo} — {regra.nome}")
+        print(f"  {regra.texto}")
+    print()
+
+
+def _ler_numero(pergunta: str, tipo=float, opcional: bool = False):
+    """Lê um número do teclado; repete a pergunta se o valor for inválido."""
+    while True:
+        texto = input(pergunta).strip().replace(",", ".")
+        if opcional and texto == "":
+            return None
+        try:
+            return tipo(texto)
+        except ValueError:
+            print("  Valor inválido, tente de novo.")
+
+
+def _ler_sim_nao(pergunta: str) -> bool:
+    return input(pergunta).strip().lower() in ("s", "sim", "y", "yes")
+
+
+def novo_orcamento() -> None:
+    """Pergunta os dados do pedido e mostra o orçamento."""
+    print("\nMateriais disponíveis: " + ", ".join(MATERIAIS))
+    material = input("Material: ")
+    peso = _ler_numero("Peso da peça (g): ")
+    tempo = _ler_numero("Tempo de impressão por peça (h): ")
+    finalidade = input("Finalidade (decorativa/funcional): ")
+    quantidade = _ler_numero("Quantidade [1]: ", tipo=int, opcional=True) or 1
+    urgente = _ler_sim_nao("Urgente? (s/n): ")
+    bico = _ler_numero("Temperatura do bico em °C [Enter = padrão do material]: ",
+                       opcional=True)
+    mesa = _ler_numero("Temperatura da mesa em °C [Enter = padrão do material]: ",
+                       opcional=True)
+    orcamento = _ler_numero("Orçamento do cliente em R$ [Enter = não informou]: ",
+                            opcional=True)
+    try:
+        resultado, explicacao = consultar(
+            material=material, peso_g=peso, tempo_h=tempo, finalidade=finalidade,
+            quantidade=quantidade, urgente=urgente, temp_bico=bico, temp_mesa=mesa,
+            orcamento_cliente=orcamento)
+    except ValueError as erro:
+        print(f"\nEntrada inválida: {erro}\n")
+        return
+    imprimir_resultado(resultado, explicacao)
+
+
+def modo_interativo() -> None:
+    """Menu principal no terminal."""
+    while True:
+        print("=== SE-Preço3D — Precificação de Impressão 3D ===")
+        print("1) Novo orçamento")
+        print("2) Casos de demonstração")
+        print("3) Listar as regras")
+        print("4) Sair")
+        opcao = input("Escolha: ").strip()
+        if opcao == "1":
+            novo_orcamento()
+        elif opcao == "2":
+            executar_demo()
+        elif opcao == "3":
+            listar_regras()
+        elif opcao == "4":
+            print("Até logo!")
+            break
+        else:
+            print("Opção inválida.\n")
+
+
+def main() -> None:
+    if "--demo" in sys.argv:
+        executar_demo()
+    else:
+        modo_interativo()
+
+
+if __name__ == "__main__":
+    main()
